@@ -1,3 +1,4 @@
+// src/api/routes/auth.routes.js
 import express from "express";
 import { register, login, refresh, logout } from "../controllers/auth.controller.js";
 import { validate } from "../../middlewares/validate.middleware.js";

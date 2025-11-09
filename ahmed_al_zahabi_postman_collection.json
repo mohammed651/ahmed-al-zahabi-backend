@@ -1,0 +1,291 @@
+{
+  "info": {
+    "name": "Ahmed Al-Zahabi Backend - Full Collection",
+    "_postman_id": "a1b2c3d4-zh-collection-full",
+    "description": "مجموعة طلبات لاختبار API محليًا — شاملة الموردين، المشتريات (cash/gold)، سداد المورد، الحركات النقدية، المخزون، المبيعات، المستخدمين.\n\nإجراءات مقترحة: 1) POST /api/auth/login للحصول على accessToken  2) ضع {{accessToken}} في المتغيرات 3) استخدم الطلبات بالترتيب أو حسب الحاجة.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.1",
+    "savedAt": "2025-11-08T00:00:00.000Z"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:5000/health",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5000",
+          "path": ["health"]
+        }
+      },
+      "response": []
+    },
+
+    {
+      "name": "Auth - Register",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Admin\",\n  \"username\": \"admin\",\n  \"password\": \"admin123\",\n  \"role\": \"admin\",\n  \"branch\": \"main\"\n}"
+        },
+        "url": {"raw":"http://localhost:5000/api/auth/register","protocol":"http","host":["localhost"],"port":"5000","path":["api","auth","register"]}
+      }
+    },
+    {
+      "name": "Auth - Login",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"admin123\"\n}"
+        },
+        "url": {"raw":"http://localhost:5000/api/auth/login","protocol":"http","host":["localhost"],"port":"5000","path":["api","auth","login"]}
+      }
+    },
+    {
+      "name": "Auth - Refresh Token",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"}],
+        "body": {"mode":"raw","raw":"{}"},
+        "url": {"raw":"http://localhost:5000/api/auth/refresh","protocol":"http","host":["localhost"],"port":"5000","path":["api","auth","refresh"]}
+      }
+    },
+    {
+      "name": "Auth - Logout",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"}],
+        "body": {"mode":"raw","raw":"{}"},
+        "url": {"raw":"http://localhost:5000/api/auth/logout","protocol":"http","host":["localhost"],"port":"5000","path":["api","auth","logout"]}
+      }
+    },
+
+    {
+      "name": "Users - List",
+      "request": {
+        "method": "GET",
+        "header": [{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "url": {"raw":"http://localhost:5000/api/users","protocol":"http","host":["localhost"],"port":"5000","path":["api","users"]}
+      }
+    },
+    {
+      "name": "Users - Create",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"},{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "body": {"mode":"raw","raw":"{\n  \"name\": \"User1\",\n  \"username\": \"user1\",\n  \"password\": \"pass123\",\n  \"role\": \"storekeeper\",\n  \"branch\": \"main\"\n}"},
+        "url": {"raw":"http://localhost:5000/api/users","protocol":"http","host":["localhost"],"port":"5000","path":["api","users"]}
+      }
+    },
+
+    {
+      "name": "Products - List",
+      "request": {
+        "method": "GET",
+        "header": [{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "url": {"raw":"http://localhost:5000/api/products","protocol":"http","host":["localhost"],"port":"5000","path":["api","products"]}
+      }
+    },
+    {
+      "name": "Products - Create",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"},{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "body": {"mode":"raw","raw":"{\n  \"code\": \"P001\",\n  \"name\": \"سلسلة ذهب\",\n  \"category\": \"سلاسل\",\n  \"karat\": 21,\n  \"weight\": \"5.25\",\n  \"pricePerGram\": \"1200\",\n  \"count_in_store\": 10,\n  \"count_in_showcase\": 3\n}"},
+        "url": {"raw":"http://localhost:5000/api/products","protocol":"http","host":["localhost"],"port":"5000","path":["api","products"]}
+      }
+    },
+    {
+      "name": "Products - Get by ID",
+      "request": {
+        "method": "GET",
+        "header": [{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "url": {"raw":"http://localhost:5000/api/products/:id","protocol":"http","host":["localhost"],"port":"5000","path":["api","products",":id"]}
+      }
+    },
+    {
+      "name": "Products - Move Stock (In)",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"},{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "body": {"mode":"raw","raw":"{\n  \"productId\": \"{{productId}}\",\n  \"type\": \"in\",\n  \"to\": \"store\",\n  \"quantity\": 5\n}"},
+        "url": {"raw":"http://localhost:5000/api/products/move","protocol":"http","host":["localhost"],"port":"5000","path":["api","products","move"]}
+      }
+    },
+
+    {
+      "name": "Stock - Create Movement",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"},{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "body": {"mode":"raw","raw":"{\n  \"product\": \"{{productId}}\",\n  \"type\": \"in\",\n  \"from\": \"supplier\",\n  \"to\": \"store\",\n  \"quantity\": 10,\n  \"note\": \"استلام شراء\"\n}"},
+        "url": {"raw":"http://localhost:5000/api/stock","protocol":"http","host":["localhost"],"port":"5000","path":["api","stock"]}
+      }
+    },
+    {
+      "name": "Stock - List Movements",
+      "request": {
+        "method": "GET",
+        "header": [{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "url": {"raw":"http://localhost:5000/api/stock","protocol":"http","host":["localhost"],"port":"5000","path":["api","stock"]}
+      }
+    },
+
+    {
+      "name": "Sales - Create",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"},{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "body": {"mode":"raw","raw":"{\n  \"branch\": \"main\",\n  \"items\": [\n    {\n      \"product\": \"{{productId}}\",\n      \"productName\": \"سلسلة ذهب\",\n      \"karat\": 21,\n      \"weight\": \"5.25\",\n      \"quantity\": 1,\n      \"pricePerGram\": \"1200\",\n      \"makingCost\": \"50\"\n    }\n  ],\n  \"customer\": {\n    \"name\": \"عميل تجريبي\",\n    \"phone\": \"0123456789\"\n  },\n  \"paymentMethod\": \"cash\"\n}"},
+        "url": {"raw":"http://localhost:5000/api/sales","protocol":"http","host":["localhost"],"port":"5000","path":["api","sales"]}
+      }
+    },
+    {
+      "name": "Sales - List",
+      "request": {
+        "method": "GET",
+        "header": [{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "url": {"raw":"http://localhost:5000/api/sales","protocol":"http","host":["localhost"],"port":"5000","path":["api","sales"]}
+      }
+    },
+
+    {
+      "name": "Cash - Create Movement",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"},{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "body": {"mode":"raw","raw":"{\n  \"branch\": \"main\",\n  \"type\": \"deposit\",\n  \"amount\": \"1000\",\n  \"reason\": \"إيداع نقدية\"\n}"},
+        "url": {"raw":"http://localhost:5000/api/cash","protocol":"http","host":["localhost"],"port":"5000","path":["api","cash"]}
+      }
+    },
+    {
+      "name": "Cash - List",
+      "request": {
+        "method": "GET",
+        "header": [{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "url": {"raw":"http://localhost:5000/api/cash","protocol":"http","host":["localhost"],"port":"5000","path":["api","cash"]}
+      }
+    },
+
+    {
+      "name": "Suppliers - Create",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"},{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "body": {"mode":"raw","raw":"{\n  \"name\": \"تاجر 1\",\n  \"phone\": \"0123456789\",\n  \"notes\": \"تاجر تجريبي\"\n}"},
+        "url": {"raw":"http://localhost:5000/api/suppliers","protocol":"http","host":["localhost"],"port":"5000","path":["api","suppliers"]}
+      }
+    },
+    {
+      "name": "Suppliers - List",
+      "request": {
+        "method": "GET",
+        "header": [{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "url": {"raw":"http://localhost:5000/api/suppliers","protocol":"http","host":["localhost"],"port":"5000","path":["api","suppliers"]}
+      }
+    },
+    {
+      "name": "Suppliers - Get by ID",
+      "request": {
+        "method": "GET",
+        "header": [{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "url": {"raw":"http://localhost:5000/api/suppliers/{{supplierId}}","protocol":"http","host":["localhost"],"port":"5000","path":["api","suppliers","{{supplierId}}"]}
+      }
+    },
+    {
+      "name": "Suppliers - Add Debt (cash)",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"},{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "body": {"mode":"raw","raw":"{\n  \"amount\": 1500,\n  \"amountType\": \"cash\",\n  \"note\": \"دين شراء\"\n}"},
+        "url": {"raw":"http://localhost:5000/api/suppliers/{{supplierId}}/debt","protocol":"http","host":["localhost"],"port":"5000","path":["api","suppliers","{{supplierId}}","debt"]}
+      }
+    },
+    {
+      "name": "Suppliers - Add Debt (gold grams)",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"},{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "body": {"mode":"raw","raw":"{\n  \"amount\": 25,\n  \"amountType\": \"gold\",\n  \"note\": \"دين جرامات\"\n}"},
+        "url": {"raw":"http://localhost:5000/api/suppliers/{{supplierId}}/debt","protocol":"http","host":["localhost"],"port":"5000","path":["api","suppliers","{{supplierId}}","debt"]}
+      }
+    },
+    {
+      "name": "Suppliers - Pay (cash from branch)",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"},{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "body": {"mode":"raw","raw":"{\n  \"amount\": 500,\n  \"amountType\": \"cash\",\n  \"source\": { \"type\": \"cash\", \"branch\": \"{{branch}}\" },\n  \"note\": \"سداد جزئي\"\n}"},
+        "url": {"raw":"http://localhost:5000/api/suppliers/{{supplierId}}/pay","protocol":"http","host":["localhost"],"port":"5000","path":["api","suppliers","{{supplierId}}","pay"]}
+      }
+    },
+    {
+      "name": "Suppliers - Pay (gold using scrap)",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"},{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "body": {"mode":"raw","raw":"{\n  \"amount\": 5,\n  \"amountType\": \"gold\",\n  \"source\": { \"type\": \"scrap\" },\n  \"note\": \"سداد جرامات من الكسر\"\n}"},
+        "url": {"raw":"http://localhost:5000/api/suppliers/{{supplierId}}/pay","protocol":"http","host":["localhost"],"port":"5000","path":["api","suppliers","{{supplierId}}","pay"]}
+      }
+    },
+    {
+      "name": "Suppliers - Transactions (list)",
+      "request": {
+        "method": "GET",
+        "header": [{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "url": {"raw":"http://localhost:5000/api/suppliers/{{supplierId}}/transactions","protocol":"http","host":["localhost"],"port":"5000","path":["api","suppliers","{{supplierId}}","transactions"]}
+      }
+    },
+
+    {
+      "name": "Purchases - Create (cash)",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"},{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "body": {"mode":"raw","raw":"{\n  \"supplier\": \"{{supplierId}}\",\n  \"branch\": \"{{branch}}\",\n  \"items\": [\n    { \"product\": \"{{productId}}\", \"weight\": 0, \"pricePerGram\": 0, \"quantity\": 2, \"subtotal\": 1000 }\n  ],\n  \"total\": 1000,\n  \"type\": \"cash\"\n}"},
+        "url": {"raw":"http://localhost:5000/api/purchases","protocol":"http","host":["localhost"],"port":"5000","path":["api","purchases"]}
+      }
+    },
+    {
+      "name": "Purchases - Create (gold grams)",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"},{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "body": {"mode":"raw","raw":"{\n  \"supplier\": \"{{supplierId}}\",\n  \"branch\": \"{{branch}}\",\n  \"items\": [],\n  \"total\": 25,\n  \"type\": \"gold\"\n}"},
+        "url": {"raw":"http://localhost:5000/api/purchases","protocol":"http","host":["localhost"],"port":"5000","path":["api","purchases"]}
+      }
+    },
+    {
+      "name": "Purchases - List",
+      "request": {
+        "method": "GET",
+        "header": [{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "url": {"raw":"http://localhost:5000/api/purchases","protocol":"http","host":["localhost"],"port":"5000","path":["api","purchases"]}
+      }
+    },
+    {
+      "name": "Purchases - Get by ID",
+      "request": {
+        "method": "GET",
+        "header": [{"key":"Authorization","value":"Bearer {{accessToken}}"}],
+        "url": {"raw":"http://localhost:5000/api/purchases/{{purchaseId}}","protocol":"http","host":["localhost"],"port":"5000","path":["api","purchases","{{purchaseId}}"]}
+      }
+    }
+
+  ],
+  "event": [],
+  "variable": [
+    {"key":"accessToken","value":""},
+    {"key":"productId","value":""},
+    {"key":"supplierId","value":""},
+    {"key":"branch","value":"main"},
+    {"key":"purchaseId","value":""}
+  ]
+}

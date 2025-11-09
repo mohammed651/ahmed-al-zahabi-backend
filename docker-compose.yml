@@ -1,34 +1,39 @@
-version: "3.8"
+# docker-compose.yml (مصلح للعمل من داخل مجلد backend)
 services:
-  api:
-    build: .
-    ports:
-      - "5000:5000"
-    env_file:
-      - .env
-    depends_on:
-      - mongo
-    volumes:
-      - .:/usr/src/app
-    command: npm run dev
-
   mongo:
-    image: mongo:6
-    restart: always
+    image: mongo:6.0
+    command: ["--replSet", "rs0", "--bind_ip_all"]
     ports:
       - "27017:27017"
     volumes:
-      - mongo-data:/data/db
+      - ./data/mongo:/data/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   mongo-express:
     image: mongo-express:1.0.0
     environment:
       ME_CONFIG_MONGODB_SERVER: mongo
-      ME_CONFIG_MONGODB_PORT: 27017
     ports:
       - "8081:8081"
     depends_on:
       - mongo
+    restart: unless-stopped
 
-volumes:
-  mongo-data:
+  backend:
+    build:
+      context: .                  # ← **هنا** استخدمنا المسار الحالي بدلاً من ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./.env                     # ← ملف .env داخل نفس المجلد
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mongo
+    volumes:
+      - ./:/usr/src/app            # ← mount مجلد backend بالكامل داخل الحاوية
+    restart: unless-stopped

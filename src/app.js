@@ -14,6 +14,9 @@ import stockRoutes from "./api/routes/stock.routes.js";
 import salesRoutes from "./api/routes/sales.routes.js";
 import cashRoutes from "./api/routes/cash.routes.js";
 import errorHandler from "./middlewares/error.middleware.js";
+import scrapRoutes from "./api/routes/scrap.routes.js";
+import purchasesRoutes from "./api/routes/purchases.routes.js";
+import suppliersRoutes from "./api/routes/suppliers.routes.js";
 
 const app = express();
 app.use(helmet());
@@ -43,6 +46,12 @@ app.use(limiter);
 
 app.use(morgan("dev"));
 
+app.use(cors({
+  origin: true, // أو ضع عنوان الواجهة الأمامية لو محدد
+  credentials: true
+}));
+
+
 app.get("/health", (req, res) => res.json({ success: true, message: "API شغال" }));
 
 app.use("/api/auth", authRoutes);
@@ -51,6 +60,9 @@ app.use("/api/products", productsRoutes);
 app.use("/api/stock", stockRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/cash", cashRoutes);
+app.use("/api/scrap", scrapRoutes);
+app.use("/api/purchases", purchasesRoutes);
+app.use("/api/suppliers", suppliersRoutes);
 
 app.use(errorHandler);
 
