@@ -24,5 +24,5 @@ export const createSaleSchema = Joi.object({
     weight: Joi.number().precision(3).min(0),
     pricePerGram: Joi.number().precision(3).min(0),
     total: Joi.number().precision(3).min(0)
-  }).optional()
+  }).optional().allow(null)
 });

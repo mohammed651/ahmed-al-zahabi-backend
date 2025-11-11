@@ -1,14 +1,33 @@
 import express from "express";
-import { authMiddleware } from "../../middlewares/auth.middleware.js";
-import { permit } from "../../middlewares/permit.middleware.js";
-import { createProduct, listProducts, getProduct, moveStock } from "../controllers/products.controller.js";
-import { validate } from "../../middlewares/validate.middleware.js";
-import { createProductSchema } from "../validators/product.validator.js";
+import {
+  createProduct,
+  listProducts,
+  getProduct,
+  updateProduct,
+  deleteProduct,
+  moveStock,
+  getProductByCode,
+  updateProductByCode,
+  deleteProductByCode,
+  moveStockSimple
+} from "../controllers/products.controller.js";
 
 const router = express.Router();
-router.get("/", authMiddleware, listProducts);
-router.post("/", authMiddleware, permit("admin","storekeeper"), validate(createProductSchema), createProduct);
-router.get("/:id", authMiddleware, getProduct);
-router.post("/move", authMiddleware, permit("admin","storekeeper","employee"), moveStock);
+
+// Routes بالـ ID
+router.post("/", createProduct);
+router.get("/", listProducts);
+router.get("/:id", getProduct);
+router.put("/:id", updateProduct);
+router.delete("/:id", deleteProduct);
+
+// Routes جديدة بالـ code
+router.get("/code/:code", getProductByCode);
+router.put("/code/:code", updateProductByCode);
+router.delete("/code/:code", deleteProductByCode);
+
+// Routes أخرى
+router.post("/move", moveStock);
+router.post("/move-simple", moveStockSimple);
 
 export default router;

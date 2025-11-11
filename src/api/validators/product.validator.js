@@ -1,7 +1,7 @@
 import Joi from 'joi';
 
 export const createProductSchema = Joi.object({
-  code: Joi.string().max(50).required(),
+  code: Joi.string().max(50),
   name: Joi.string().max(200).required(),
   category: Joi.string().allow('', null),
   karat: Joi.number().integer().min(1).max(24).optional(),
