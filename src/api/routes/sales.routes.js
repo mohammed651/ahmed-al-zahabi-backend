@@ -1,12 +1,96 @@
+// src/api/routes/sales.routes.js
 import express from "express";
-import { createSale, listSales } from "../controllers/sales.controller.js";
+import {
+  createSale,
+  createQuickSale,
+  listSales,
+  getSale,
+  getSaleByInvoiceNo,
+  updateSaleStatus,
+  deleteSale,
+  getSalesReport,
+  purchaseScrap
+} from "../controllers/sales.controller.js";
 import { authMiddleware } from "../../middlewares/auth.middleware.js";
 import { permit } from "../../middlewares/permit.middleware.js";
 import { validate } from "../../middlewares/validate.middleware.js";
-import { createSaleSchema } from "../validators/sale.validator.js";
+import {
+  createSaleSchema,
+  createQuickSaleSchema,
+  purchaseScrapSchema,
+  salesReportSchema,
+  updateSaleSchema
+} from "../validators/sale.validator.js";
+
 
 const router = express.Router();
-router.post("/", authMiddleware, permit("admin","storekeeper","employee"), validate(createSaleSchema), createSale);
-router.get("/", authMiddleware, permit("admin","accountant"), listSales);
+
+// إنشاء فاتورة بيع عادية
+router.post("/", 
+  authMiddleware, 
+  permit("admin", "accountant", "employee"), 
+  validate(createSaleSchema), 
+  createSale
+);
+
+// إنشاء فاتورة بيع سريعة
+router.post("/quick", 
+  authMiddleware, 
+  permit("admin", "accountant", "employee"), 
+  validate(createQuickSaleSchema), 
+  createQuickSale
+);
+
+// شراء كسر منفصل
+router.post("/purchase-scrap", 
+  authMiddleware, 
+  permit("admin", "accountant", "employee"), 
+  validate(purchaseScrapSchema), 
+  purchaseScrap
+);
+
+// قائمة الفواتير
+router.get("/", 
+  authMiddleware, 
+  permit("admin", "accountant", "storekeeper"), 
+  listSales
+);
+
+// تقرير المبيعات
+router.get("/report", 
+  authMiddleware, 
+  permit("admin", "accountant"), 
+  validate(salesReportSchema, "query"), 
+  getSalesReport
+);
+
+// الحصول على فاتورة بالرقم
+router.get("/invoice/:invoiceNo", 
+  authMiddleware, 
+  permit("admin", "accountant", "storekeeper", "employee"), 
+  getSaleByInvoiceNo
+);
+
+// الحصول على فاتورة بالID
+router.get("/:id", 
+  authMiddleware, 
+  permit("admin", "accountant", "storekeeper", "employee"), 
+  getSale
+);
+
+// تحديث حالة الفاتورة
+router.patch("/:id/status", 
+  authMiddleware, 
+  permit("admin", "accountant"), 
+  validate(updateSaleSchema), 
+  updateSaleStatus
+);
+
+// حذف الفاتورة
+router.delete("/:id", 
+  authMiddleware, 
+  permit("admin", "accountant"), 
+  deleteSale
+);
 
 export default router;

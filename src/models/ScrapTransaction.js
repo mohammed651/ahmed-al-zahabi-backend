@@ -3,16 +3,24 @@ import mongoose from "mongoose";
 const { Schema } = mongoose;
 
 const scrapTransactionSchema = new Schema({
-  type: { type: String, enum: ["receive","move","consume","sell_to_trader","adjust"], required: true },
-  branchFrom: { type: String }, // optional (for move)
-  branchTo: { type: String },   // optional (for move/receive)
+  type: { 
+    type: String, 
+    enum: ["purchase_from_customer", "add_from_invoice", "direct_add", "transfer_to_store", "consume", "move_between_stores", "adjust"], 
+    required: true 
+  },
+  branchFrom: { type: String },
+  branchTo: { type: String },
   karat: { type: Number, required: true },
   grams: { type: mongoose.Schema.Types.Decimal128, required: true },
-  value: { type: mongoose.Schema.Types.Decimal128 }, // optional monetary value if any
-  performedBy: { type: String }, // اسم الموظف المستلم/الفاعل
-  recordedBy: { type: Schema.Types.ObjectId, ref: "User" }, // اللي دخل السجل
-  relatedSupplierId: { type: Schema.Types.ObjectId, ref: "Supplier" }, // اختياري لو العملية لها علاقة بتاجر (لكن لا يحدث تلقائي)
-  notes: String
+  pricePerGram: { type: mongoose.Schema.Types.Decimal128 },
+  totalValue: { type: mongoose.Schema.Types.Decimal128 },
+  performedBy: { type: String },
+  recordedBy: { type: Schema.Types.ObjectId, ref: "User" },
+  source: { type: String },
+  destination: { type: String },
+  notes: String,
+  customerName: { type: String },
+  invoiceNumber: { type: String }
 }, { timestamps: true });
 
 export default mongoose.model("ScrapTransaction", scrapTransactionSchema);
