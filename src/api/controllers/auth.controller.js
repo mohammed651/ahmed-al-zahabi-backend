@@ -23,7 +23,13 @@ export async function register(req, res) {
 }
 
 function signAccessToken(user) {
-  return jwt.sign({ id: user._id, role: user.role }, config.jwtSecret, { expiresIn: '30m' });
+  // 🔥 التصحيح النهائي
+  return jwt.sign({ 
+    id: user._id.toString(), // 🔥 هنا التصحيح
+    role: user.role 
+  }, config.jwtSecret, { 
+    expiresIn: '30m' 
+  });
 }
 
 function signRefreshToken() {

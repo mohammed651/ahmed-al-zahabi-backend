@@ -238,18 +238,11 @@ export const purchaseScrapSchema = Joi.object({
     name: Joi.string().allow('').optional(),
     phone: Joi.string().allow('').optional()
   }).optional(),
+  // اجعل payment اختياريًا. لو ارسل method electronic، فالحقل electronicAccount يصبح مطلوباً.
   payment: Joi.object({
-    method: Joi.string().valid('cash', 'electronic').required().messages({
-      'any.only': 'طريقة الدفع يجب أن تكون cash أو electronic',
-      'any.required': 'طريقة الدفع مطلوبة'
-    }),
-    electronicAccount: Joi.string().optional().when('method', {
-      is: 'electronic',
-      then: Joi.required().messages({
-        'any.required': 'الحساب الإلكتروني مطلوب للدفع الإلكتروني'
-      })
-    })
-  }).required()
+    method: Joi.string().valid('cash', 'electronic').optional().default('cash'),
+    electronicAccount: Joi.string().optional()
+  }).optional()
 });
 
 // Validator لتقرير المبيعات

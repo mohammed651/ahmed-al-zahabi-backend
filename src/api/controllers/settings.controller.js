@@ -57,7 +57,7 @@ export async function initializeDefaultSettings(req, res) {
   try {
     const defaultSettings = [
       // إعدادات عامة
-      { key: "app_name", value: "أحمد الزهابي للمجوهرات", type: "string", category: "general", description: "اسم التطبيق" },
+      { key: "app_name", value: "أحمد الذهبي للمجوهرات", type: "string", category: "general", description: "اسم التطبيق" },
       { key: "currency", value: "EGP", type: "string", category: "general", description: "العملة" },
       
       // إعدادات المخزون

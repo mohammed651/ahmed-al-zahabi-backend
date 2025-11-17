@@ -9,7 +9,9 @@ import {
   updateSaleStatus,
   deleteSale,
   getSalesReport,
-  purchaseScrap
+  purchaseScrap,
+  getMySales,
+  updateSale
 } from "../controllers/sales.controller.js";
 import { authMiddleware } from "../../middlewares/auth.middleware.js";
 import { permit } from "../../middlewares/permit.middleware.js";
@@ -70,6 +72,12 @@ router.get("/invoice/:invoiceNo",
   permit("admin", "accountant", "storekeeper", "employee"), 
   getSaleByInvoiceNo
 );
+// فواتيري الشخصية
+router.get("/my-sales", 
+  authMiddleware, 
+  permit("admin", "accountant", "employee"),  // 🔥 غير لـ "accountant" بدل "accountant1", "accountant2"
+  getMySales
+);
 
 // الحصول على فاتورة بالID
 router.get("/:id", 
@@ -86,11 +94,20 @@ router.patch("/:id/status",
   updateSaleStatus
 );
 
+
 // حذف الفاتورة
 router.delete("/:id", 
   authMiddleware, 
   permit("admin", "accountant"), 
   deleteSale
+);
+
+// تحديث الفاتورة
+router.put("/:id", 
+  authMiddleware, 
+  permit("admin", "accountant"), 
+  validate(updateSaleSchema), 
+  updateSale
 );
 
 export default router;

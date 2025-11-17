@@ -35,7 +35,7 @@ const paymentSchema = new Schema({
     required: true 
   },
   amount: { type: mongoose.Schema.Types.Decimal128, required: true },
-  electronicAccount: { type: Schema.Types.ObjectId, ref: "ElectronicAccount" },
+  electronicAccount: { type: mongoose.Schema.Types.ObjectId, ref: "ElectronicAccount" },
   installmentDetails: {
     months: Number,
     monthlyPayment: { type: mongoose.Schema.Types.Decimal128 }
@@ -78,36 +78,86 @@ const saleSchema = new Schema({
   notes: String // أضفنا ملاحظات
 }, { timestamps: true });
 
-// أضفنا middleware للحسابات التلقائية
+// دالة تقريب لأقرب 5 باستخدام ROUND (مطابقة للفرونت)
+function roundToNearest5Number(n) {
+  if (!isFinite(n)) return 0;
+  return Math.round(n / 5) * 5;
+}
+// أضفنا middleware للحسابات التلقائية (محدث - roundedTotal و payment.amount موجبين)
 saleSchema.pre("save", function(next) {
-  // حساب المجموع الفرعي للمنتجات
-  const itemsTotal = this.items.reduce((sum, item) => {
-    return sum + Number(item.subtotal?.toString() || 0);
-  }, 0);
-  
-  // حساب إجمالي السكراب
-  const scrapTotal = this.exchangedScrap.reduce((sum, scrap) => {
-    return sum + Number(scrap.total?.toString() || 0);
-  }, 0);
-  
-  // حساب إجمالي الخدمات
-  const servicesTotal = this.additionalServices.reduce((sum, service) => {
-    return sum + Number(service.price?.toString() || 0);
-  }, 0);
-  
-  this.subtotal = mongoose.Types.Decimal128.fromString(String(itemsTotal));
-  this.scrapTotal = mongoose.Types.Decimal128.fromString(String(scrapTotal));
-  this.servicesTotal = mongoose.Types.Decimal128.fromString(String(servicesTotal));
-  
-  // حساب الإجمالي النهائي
-  const netTotal = itemsTotal + servicesTotal - scrapTotal - Number(this.manualDiscount?.toString() || 0);
-  this.total = mongoose.Types.Decimal128.fromString(String(netTotal));
-  
-  // تقريب لأقرب 5 جنيه
-  const rounded = Math.ceil(netTotal / 5) * 5;
-  this.roundedTotal = mongoose.Types.Decimal128.fromString(String(rounded));
-  
-  next();
+  try {
+    // حساب المجموع الفرعي للمنتجات.
+    let itemsTotal = 0;
+    this.items = (this.items || []).map(item => {
+      const price = Number(item.pricePerGram?.toString?.() || item.price?.toString?.() || 0);
+      const weight = Number(item.weight?.toString?.() || 0);
+      const making = Number(item.makingCost?.toString?.() || 0);
+      const quantity = Number(item.quantity || item.qty || 1);
+
+      let rawSubtotal = Number(item.subtotal?.toString?.());
+      if (!rawSubtotal || rawSubtotal === 0) {
+        rawSubtotal = (price + making) * weight * quantity;
+      }
+
+      const roundedSubtotal = roundToNearest5Number(rawSubtotal);
+
+      // نخزن Decimal128
+      item.subtotal = mongoose.Types.Decimal128.fromString(String(roundedSubtotal));
+
+      itemsTotal += roundedSubtotal;
+      return item;
+    });
+
+    // حساب إجمالي السكراب
+    let scrapTotal = 0;
+    this.exchangedScrap = (this.exchangedScrap || []).map(scrap => {
+      const price = Number(scrap.pricePerGram?.toString?.() || 0);
+      const weight = Number(scrap.weight?.toString?.() || 0);
+      let raw = Number(scrap.total?.toString?.());
+      if (!raw || raw === 0) raw = price * weight;
+      const rounded = roundToNearest5Number(raw);
+      scrap.total = mongoose.Types.Decimal128.fromString(String(rounded));
+      scrapTotal += rounded;
+      return scrap;
+    });
+
+    // حساب إجمالي الخدمات
+    const servicesTotal = (this.additionalServices || []).reduce((sum, service) => {
+      const p = Number(service.price?.toString?.() || 0);
+      return sum + p;
+    }, 0);
+
+    const manualDiscount = Number(this.manualDiscount?.toString?.() || 0);
+
+    // تعيين الحقول كـ Decimal128
+    this.subtotal = mongoose.Types.Decimal128.fromString(String(itemsTotal));
+    this.scrapTotal = mongoose.Types.Decimal128.fromString(String(scrapTotal));
+    this.servicesTotal = mongoose.Types.Decimal128.fromString(String(servicesTotal));
+
+    // حساب الإجمالي النهائي (قد يكون سالباً للدلالة على أن المتجر يدفع)
+    const netTotal = itemsTotal + servicesTotal - scrapTotal - manualDiscount;
+    this.total = mongoose.Types.Decimal128.fromString(String(netTotal));
+
+    // **هنا التعديل الأساسي**: roundedTotal يمثل مقدار الدفع الفعلي (دائماً موجب)
+    const roundedAbs = roundToNearest5Number(Math.abs(netTotal));
+    this.roundedTotal = mongoose.Types.Decimal128.fromString(String(roundedAbs));
+
+    // اضبط payment.amount ليطابق المبلغ الذي يُعرض/يُدفع (موجب)
+    if (!this.payment) {
+      this.payment = { method: "cash", amount: mongoose.Types.Decimal128.fromString(String(roundedAbs)) };
+    } else {
+      try {
+        this.payment.amount = mongoose.Types.Decimal128.fromString(String(roundedAbs));
+      } catch (e) {
+        console.warn('Failed to set payment.amount to Decimal128 in pre-save:', e);
+      }
+    }
+
+    next();
+  } catch (err) {
+    next(err);
+  }
 });
+
 
 export default mongoose.model("Sale", saleSchema);
