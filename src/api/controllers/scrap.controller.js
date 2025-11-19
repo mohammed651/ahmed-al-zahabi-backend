@@ -2,6 +2,7 @@
 import mongoose from "mongoose";
 import ScrapStore from "../../models/ScrapStore.js";
 import ScrapTransaction from "../../models/ScrapTransaction.js";
+import { ScrapService } from "../../services/scrap.service.js";
 import { success, error } from "../../utils/responses.js";
 
 // helper: add grams to scrap store for given karat
@@ -232,6 +233,61 @@ export async function moveBetweenStores(req, res) {
     session.endSession();
     console.error(err);
     return error(res, "فشل في نقل الكسر", 400, err.message);
+  }
+}
+
+// 16. تحويل سكراب بين الفروع (مبسط)
+export async function transferScrap(req, res) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { fromBranch, toBranch, karat, grams, notes } = req.body;
+    
+    await ScrapService.transferScrapBetweenBranches(
+      session, 
+      fromBranch, 
+      toBranch, 
+      karat, 
+      grams, 
+      req.user._id,
+      notes
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+    
+    return success(res, null, `تم تحويل ${grams} جرام عيار ${karat} من ${fromBranch} إلى ${toBranch}`);
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error(err);
+    return error(res, "فشل في تحويل السكراب", 400, err.message);
+  }
+}
+
+// 17. تحويل كل سكراب فرع للمخزن (نهاية اليوم)
+export async function transferAllToWarehouse(req, res) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { fromBranch } = req.body;
+    
+    const result = await ScrapService.transferAllScrapToWarehouse(
+      session, 
+      fromBranch, 
+      "warehouse", 
+      req.user._id
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+    
+    return success(res, result, "تم تحويل كل السكراب للمخزن");
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error(err);
+    return error(res, "فشل في تحويل السكراب", 400, err.message);
   }
 }
 

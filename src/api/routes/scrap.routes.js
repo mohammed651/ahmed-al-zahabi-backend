@@ -15,7 +15,9 @@ import {
   getStoreDetailedReport,
   getScrapSummaryByKarat,
   getScrapWithValueReport,
-  getBranchPerformanceReport
+  getBranchPerformanceReport,
+  transferScrap,
+  transferAllToWarehouse
 } from "../controllers/scrap.controller.js";
 import { validate } from "../../middlewares/validate.middleware.js";
 import {
@@ -24,7 +26,9 @@ import {
   directAddScrapSchema,
   transferScrapSchema,
   deductScrapSchema,
-  moveScrapSchema
+  moveScrapSchema,
+  transferScrapSimpleSchema,
+  transferAllToWarehouseSchema
 } from "../validators/scrap.validator.js";
 import { authMiddleware } from "../../middlewares/auth.middleware.js";
 import { permit } from "../../middlewares/permit.middleware.js";
@@ -38,6 +42,10 @@ router.post("/direct-add", authMiddleware, permit("admin","storekeeper"), valida
 router.post("/transfer", authMiddleware, permit("admin","accountant","employee"), validate(transferScrapSchema), transferToStore);
 router.post("/deduct", authMiddleware, permit("admin","storekeeper"), validate(deductScrapSchema), deductFromStore);
 router.post("/move", authMiddleware, permit("admin","storekeeper"), validate(moveScrapSchema), moveBetweenStores);
+
+// التحويلات الجديدة
+router.post("/transfer-scrap", authMiddleware, permit("admin","accountant","employee"), validate(transferScrapSimpleSchema), transferScrap);
+router.post("/transfer-to-warehouse", authMiddleware, permit("admin","accountant","employee"), validate(transferAllToWarehouseSchema), transferAllToWarehouse);
 
 // التقارير
 router.get("/stores", authMiddleware, permit("admin","accountant","storekeeper"), listStores);

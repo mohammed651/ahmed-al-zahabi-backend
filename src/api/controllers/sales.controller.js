@@ -8,6 +8,7 @@ import ElectronicTransaction from "../../models/ElectronicTransaction.js";
 import { generateInvoiceNo } from "../../utils/generateInvoiceNo.js";
 import { success, error } from "../../utils/responses.js";
 import { recordCashMovement } from "../../services/cash.service.js"; // service مركزي لحركات الكاش
+import { ScrapService } from "../../services/scrap.service.js"; // خدمة السكراب
 
 // دالة التقريب لأقرب 5 جنيه — مطابق للفرونت (Math.round)
 const roundToNearest5 = (price) => {
@@ -41,6 +42,7 @@ async function updateElectronicAccountBalance(accountId, amount, reference, user
  * - دفع مختلط: payment.cashAmount, payment.electronicAmount (+ payment.electronicAccount)
  * - تسجيل حركة نقدية للخزنة عن طريق recordCashMovement
  * - تعديل حالة الفاتورة إلى pending/paid حسب المدفوع
+ * - إضافة السكراب تلقائياً لمخزن الفرع
  */
 export async function createSale(req, res) {
   const session = await mongoose.startSession();
@@ -231,6 +233,11 @@ export async function createSale(req, res) {
       }
     }
 
+    // === إضافة السكراب تلقائياً لمخزن الفرع ===
+    if (exchangedScrap && exchangedScrap.length > 0) {
+      await ScrapService.addScrapFromSale(session, sale, req.user._id);
+    }
+
     await session.commitTransaction();
     session.endSession();
 
@@ -401,6 +408,11 @@ export async function deleteSale(req, res) {
           }], { session });
         }
       }
+    }
+
+    // === إزالة السكراب من المخزن عند حذف الفاتورة ===
+    if (sale.exchangedScrap && sale.exchangedScrap.length > 0) {
+      await ScrapService.removeScrapFromSale(session, sale, req.user._id);
     }
 
     // عكس المدفوعات:
@@ -600,6 +612,11 @@ export async function purchaseScrap(req, res) {
     };
 
     const sale = await Sale.create([saleData], { session });
+
+    // === إضافة السكراب للمخزن في عملية الشراء المباشر ===
+    if (scrapDetails && scrapDetails.length > 0) {
+      await ScrapService.addScrapFromSale(session, sale, req.user._id);
+    }
 
     // معالجة الدفع الإلكتروني:
     // لو الدفع إلكتروني، المتجر يدفع للعميل -> نمرّر قيمة سالبة لسحب من الحساب الإلكتروني

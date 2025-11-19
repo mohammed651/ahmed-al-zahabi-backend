@@ -55,3 +55,16 @@ export const moveScrapSchema = Joi.object({
   performedBy: Joi.string().optional(),
   notes: Joi.string().allow("", null)
 });
+
+// التحويلات الجديدة
+export const transferScrapSimpleSchema = Joi.object({
+  fromBranch: Joi.string().required().messages({ "any.required": "الفرع المصدر مطلوب" }),
+  toBranch: Joi.string().required().messages({ "any.required": "الفرع الهدف مطلوب" }),
+  karat: Joi.number().valid(18, 21, 24).required().messages({ "any.required": "العيار مطلوب" }),
+  grams: Joi.number().positive().required().messages({ "any.required": "الوزن مطلوب" }),
+  notes: Joi.string().allow("", null)
+});
+
+export const transferAllToWarehouseSchema = Joi.object({
+  fromBranch: Joi.string().required().messages({ "any.required": "الفرع المصدر مطلوب" })
+});
