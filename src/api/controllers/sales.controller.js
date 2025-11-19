@@ -1,3 +1,4 @@
+// src/api/controllers/sales.controller.js
 import mongoose from "mongoose";
 import Sale from "../../models/Sale.js";
 import Product from "../../models/Product.js";
@@ -6,41 +7,57 @@ import ElectronicAccount from "../../models/ElectronicAccount.js";
 import ElectronicTransaction from "../../models/ElectronicTransaction.js";
 import { generateInvoiceNo } from "../../utils/generateInvoiceNo.js";
 import { success, error } from "../../utils/responses.js";
+import { recordCashMovement } from "../../services/cash.service.js"; // service مركزي لحركات الكاش
 
 // دالة التقريب لأقرب 5 جنيه — مطابق للفرونت (Math.round)
 const roundToNearest5 = (price) => {
-const n = Number(price || 0);
-return Math.round(n / 5) * 5;
+  const n = Number(price || 0);
+  return Math.round(n / 5) * 5;
 };
 
 // دالة مساعدة لتحديث رصيد الحساب الإلكتروني
 async function updateElectronicAccountBalance(accountId, amount, reference, userId, session) {
   const account = await ElectronicAccount.findById(accountId).session(session);
   if (!account) throw new Error("الحساب الإلكتروني غير موجود");
-  
+
   const currentBalance = Number(account.currentBalance?.toString() || 0);
   account.currentBalance = currentBalance + Number(amount);
   await account.save({ session });
-  
+
   await ElectronicTransaction.create([{
     account: accountId,
     type: Number(amount) >= 0 ? "deposit" : "withdrawal",
     amount: Math.abs(Number(amount)),
     reference: `بيع - ${reference}`,
-    notes: Number(amount) >= 0 ? "إيداع من عملية بيع" : "سحب بسبب حذف فاتورة",
+    notes: Number(amount) >= 0 ? "إيداع من عملية بيع" : "سحب بسبب حذف فاتورة/تسوية",
     recordedBy: userId
   }], { session });
 }
 
+/**
+ * createSale
+ * يدعم الآن:
+ * - أخذ الفرع من req.user.branch
+ * - دفع مختلط: payment.cashAmount, payment.electronicAmount (+ payment.electronicAccount)
+ * - تسجيل حركة نقدية للخزنة عن طريق recordCashMovement
+ * - تعديل حالة الفاتورة إلى pending/paid حسب المدفوع
+ */
 export async function createSale(req, res) {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const { 
-      branch, 
-      items = [], 
-      customer = {}, 
-      payment = {}, 
+    // branch يجب أن يأتي من اليوزر (كما طلبت)
+    const branchFromUser = req.user?.branch;
+    if (!branchFromUser) {
+      await session.abortTransaction();
+      session.endSession();
+      return error(res, "الفرع الخاص بالمستخدم غير مُعرّف", 400);
+    }
+
+    const {
+      items = [],
+      customer = {},
+      payment = {},
       exchangedScrap = [],
       additionalServices = [],
       manualDiscount = 0,
@@ -62,7 +79,7 @@ export async function createSale(req, res) {
           session.endSession();
           return error(res, `المنتج غير موجود: ${it.productName}`, 404);
         }
-        
+
         if (prod.count_in_showcase < (it.quantity || 1)) {
           await session.abortTransaction();
           session.endSession();
@@ -78,7 +95,7 @@ export async function createSale(req, res) {
       const weight = Number(it.weight || 0);
       const making = Number(it.makingCost || 0);
       const quantity = Number(it.quantity || it.qty || 1);
-      
+
       const rawSubtotal = (price + making) * weight * quantity;
       const roundedSubtotal = roundToNearest5(rawSubtotal);
       it.subtotal = roundedSubtotal;
@@ -104,14 +121,15 @@ export async function createSale(req, res) {
     const roundedTotal = roundToNearest5(totalBeforeRounding);
 
     const invoiceNo = generateInvoiceNo();
-    
+
     // جهز بيانات الفاتورة مع القيم المحسوبة
+    // لاحظ: نعطي sale.payment كما استلمناها، لكن نضيف حقول مساعدة لاحقاً
     const saleData = {
       invoiceNo,
-      branch,
+      branch: branchFromUser,
       items,
       customer,
-      payment,
+      payment: payment || { method: "cash", amount: roundedTotal },
       exchangedScrap,
       additionalServices,
       manualDiscount,
@@ -125,18 +143,71 @@ export async function createSale(req, res) {
     };
 
     // إنشاء الفاتورة داخل الـ session
-    const sale = await Sale.create([saleData], { session });
+    const saleArr = await Sale.create([saleData], { session });
+    const sale = saleArr[0];
 
-    // معالجة الدفع الإلكتروني (إذا لزم)
-    if ((payment.method === "electronic" || payment.method === "electronic") && payment.electronicAccount) {
+    // === معالجة المدفوعات (نُدعم الدفع المختلط) ===
+    // توقعات payment possible shapes:
+    // 1) legacy: { method: "cash" | "electronic" | "installment", amount }
+    // 2) mixed: { cashAmount: 1000, electronicAmount: 500, electronicAccount }
+    // 3) quick sale used paymentMethod field (handled elsewhere)
+    const cashAmount = Number(payment?.cashAmount || (payment?.method === "cash" ? (payment?.amount || roundedTotal) : 0));
+    const electronicAmount = Number(payment?.electronicAmount || (payment?.method === "electronic" ? (payment?.amount || 0) : 0));
+    const electronicAccountId = payment?.electronicAccount || payment?.electronicAccountId || null;
+
+    // سجل الكاش في الخزنة لو فيه مبلغ نقدي
+    if (cashAmount && cashAmount > 0) {
+      await recordCashMovement({
+        session,
+        branch: branchFromUser,
+        type: "deposit",
+        amount: Number(cashAmount),
+        reason: `نقدي - فاتورة ${invoiceNo}`,
+        user: req.user._id,
+        referenceType: "sale",
+        referenceId: sale._id
+      });
+    }
+
+    // حدث الحساب الإلكتروني لو فيه مبلغ إلكتروني
+    if (electronicAmount && electronicAmount > 0) {
+      if (!electronicAccountId) {
+        // rollback because electronic amount provided without account
+        await session.abortTransaction();
+        session.endSession();
+        return error(res, "المبلغ الإلكتروني معطى بدون حساب إلكتروني", 400);
+      }
       await updateElectronicAccountBalance(
-        payment.electronicAccount, 
-        Number(sale[0].roundedTotal?.toString() || sale[0].total?.toString() || 0), 
-        invoiceNo, 
-        req.user._id, 
+        electronicAccountId,
+        Number(electronicAmount),
+        invoiceNo,
+        req.user._id,
         session
       );
     }
+
+    // حدّد الحالة: paid إذا المدفوع >= roundedTotal، وإلا pending
+    const totalPaid = Number(cashAmount || 0) + Number(electronicAmount || 0);
+    if (totalPaid >= Number(roundedTotal)) {
+      sale.status = "paid";
+    } else if (totalPaid > 0 && totalPaid < Number(roundedTotal)) {
+      sale.status = "pending";
+    } else {
+      // ما فيش دفع — خليها draft عادي أو حسب ما جاء
+      sale.status = sale.status || "draft";
+    }
+
+    // نحدّث حقل payment ليوضح الأرقام المسيطرة (مفيد للفرونت)
+    sale.payment = {
+      method: payment?.method || (totalPaid > 0 ? "mixed" : "cash"),
+      amount: mongoose.Types.Decimal128.fromString(String(roundedTotal)),
+      cashAmount: mongoose.Types.Decimal128.fromString(String(cashAmount || 0)),
+      electronicAmount: mongoose.Types.Decimal128.fromString(String(electronicAmount || 0)),
+      electronicAccount: electronicAccountId || undefined,
+      installmentDetails: payment?.installmentDetails || undefined
+    };
+
+    await sale.save({ session });
 
     // خصم المخزون وإنشاء StockMovement (from: showcase -> to: store)
     for (const it of items) {
@@ -145,7 +216,7 @@ export async function createSale(req, res) {
         if (prod) {
           prod.count_in_showcase = prod.count_in_showcase - (it.quantity || 1);
           await prod.save({ session });
-          
+
           await StockMovement.create([{
             product: prod._id,
             type: "out",
@@ -163,7 +234,11 @@ export async function createSale(req, res) {
     await session.commitTransaction();
     session.endSession();
 
-    return success(res, sale[0], "تم إنشاء الفاتورة بنجاح", 201);
+    // رجّع الفاتورة بعد populate مفيد
+    await sale.populate("createdBy", "name");
+    await sale.populate("payment.electronicAccount", "name");
+
+    return success(res, sale, "تم إنشاء الفاتورة بنجاح", 201);
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
@@ -173,140 +248,50 @@ export async function createSale(req, res) {
 }
 
 export async function createQuickSale(req, res) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  // إعادة توجيه إلى createSale بعد تجهيز payment على شكل مبسط (للتوافق)
   try {
-    const { 
-      branch, 
-      items = [], 
-      customer = {}, 
-      paymentMethod = "cash", 
+    // ضع payment كما يرسله الفرونت في quick sale إلى body.payment
+    const {
+      paymentMethod = "cash",
       electronicAccount,
-      exchangedScrap = [],
-      additionalServices = [],
-      manualDiscount = 0 
+      cashAmount,
+      electronicAmount
     } = req.body;
 
-    if (!items || items.length === 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return error(res, "يجب إضافة منتجات على الأقل", 400);
+    // إذا المستخدم أرسل مبالغ جزئية ضمن quick (cashAmount/electronicAmount)، حولهم
+    req.body.payment = req.body.payment || {};
+    if (cashAmount !== undefined || electronicAmount !== undefined) {
+      req.body.payment.cashAmount = Number(cashAmount || 0);
+      req.body.payment.electronicAmount = Number(electronicAmount || 0);
+      if (electronicAccount) req.body.payment.electronicAccount = electronicAccount;
+      // method فارغ أو mixed
+      req.body.payment.method = (Number(req.body.payment.cashAmount || 0) > 0 && Number(req.body.payment.electronicAmount || 0) > 0) ? "mixed" : paymentMethod;
+    } else {
+      // legacy: single method
+      req.body.payment = { method: paymentMethod, amount: undefined, electronicAccount };
     }
 
-    // احسب subtotal لكل عنصر و مجموعات مثل createSale
-    let itemsTotal = 0;
-    for (const it of items) {
-      const price = Number(it.pricePerGram || it.price || 0);
-      const weight = Number(it.weight || 0);
-      const making = Number(it.makingCost || 0);
-      const quantity = Number(it.quantity || it.qty || 1);
-
-      const rawSubtotal = (price + making) * weight * quantity;
-      const roundedSubtotal = roundToNearest5(rawSubtotal);
-      it.subtotal = roundedSubtotal;
-      itemsTotal += roundedSubtotal;
-    }
-
-    let scrapTotal = 0;
-    for (const scrap of exchangedScrap) {
-      const price = Number(scrap.pricePerGram || 0);
-      const weight = Number(scrap.weight || 0);
-      const raw = price * weight;
-      const rounded = roundToNearest5(raw);
-      scrap.total = rounded;
-      scrapTotal += rounded;
-    }
-
-    const servicesTotal = (additionalServices || []).reduce((s, svc) => s + Number(svc.price || 0), 0);
-
-    const totalBeforeRounding = itemsTotal + servicesTotal - scrapTotal - Number(manualDiscount || 0);
-    const roundedTotal = roundToNearest5(totalBeforeRounding);
-
-    const payment = {
-      method: paymentMethod,
-      amount: roundedTotal
-    };
-    if (electronicAccount) payment.electronicAccount = electronicAccount;
-
-    const invoiceNo = generateInvoiceNo();
-    const saleData = {
-      invoiceNo,
-      branch,
-      items,
-      customer,
-      payment,
-      exchangedScrap,
-      additionalServices,
-      manualDiscount,
-      subtotal: itemsTotal,
-      scrapTotal,
-      servicesTotal,
-      total: totalBeforeRounding,
-      roundedTotal,
-      createdBy: req.user._id
-    };
-
-    const sale = await Sale.create([saleData], { session });
-
-    // معالجة الدفع الإلكتروني
-    if (paymentMethod === "electronic" && electronicAccount) {
-      await updateElectronicAccountBalance(
-        electronicAccount, 
-        Number(sale[0].roundedTotal?.toString() || sale[0].total?.toString() || 0), 
-        invoiceNo, 
-        req.user._id, 
-        session
-      );
-    }
-
-    // خصم المخزون وإنشاء StockMovement (from: showcase -> to: store)
-    for (const it of items) {
-      if (it.product) {
-        const prod = await Product.findById(it.product).session(session);
-        if (prod) {
-          prod.count_in_showcase = prod.count_in_showcase - (it.quantity || 1);
-          await prod.save({ session });
-          
-          await StockMovement.create([{
-            product: prod._id,
-            type: "out",
-            from: "showcase",
-            to: "store",
-            quantity: it.quantity || 1,
-            performedByEmployeeName: req.user.name,
-            recordedBy: req.user._id,
-            notes: `بيع سريع - فاتورة ${invoiceNo}`
-          }], { session });
-        }
-      }
-    }
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return success(res, sale[0], "تم إنشاء الفاتورة السريعة بنجاح", 201);
+    // قم باستدعاء createSale لعمل الباقي
+    return await createSale(req, res);
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
-    console.error('Create quick sale error:', err);
-    return error(res, "فشل إنشاء الفاتورة السريعة", 500, err.message);
+    console.error('createQuickSale wrapper error:', err);
+    return error(res, "فشل في إنشاء الفاتورة السريعة", 500, err.message);
   }
 }
-
 
 export async function listSales(req, res) {
   try {
     const { page = 1, limit = 50, status, branch } = req.query;
-    
+
     let filter = {};
     if (status) filter.status = status;
     if (branch) filter.branch = branch;
-    
+
     const sales = await Sale.find(filter)
       .populate("createdBy", "name")
       .populate("payment.electronicAccount", "name")
       .sort({ createdAt: -1 })
-      .skip((page-1)*limit)
+      .skip((page - 1) * limit)
       .limit(Number(limit));
 
     const total = await Sale.countDocuments(filter);
@@ -331,7 +316,7 @@ export async function getSale(req, res) {
     const sale = await Sale.findById(req.params.id)
       .populate("createdBy", "name")
       .populate("payment.electronicAccount", "name");
-    
+
     if (!sale) return error(res, "الفاتورة غير موجودة", 404);
     return success(res, sale, "الفاتورة");
   } catch (err) {
@@ -346,7 +331,7 @@ export async function getSaleByInvoiceNo(req, res) {
     const sale = await Sale.findOne({ invoiceNo })
       .populate("createdBy", "name")
       .populate("payment.electronicAccount", "name");
-    
+
     if (!sale) return error(res, "الفاتورة غير موجودة", 404);
     return success(res, sale, "الفاتورة");
   } catch (err) {
@@ -361,7 +346,7 @@ export async function updateSaleStatus(req, res) {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    
+
     const sale = await Sale.findById(id).session(session);
     if (!sale) {
       await session.abortTransaction();
@@ -388,7 +373,7 @@ export async function deleteSale(req, res) {
   session.startTransaction();
   try {
     const { id } = req.params;
-    
+
     const sale = await Sale.findById(id).session(session);
     if (!sale) {
       await session.abortTransaction();
@@ -403,7 +388,7 @@ export async function deleteSale(req, res) {
         if (prod) {
           prod.count_in_showcase = (prod.count_in_showcase || 0) + (it.quantity || 1);
           await prod.save({ session });
-          
+
           await StockMovement.create([{
             product: prod._id,
             type: "in",
@@ -418,13 +403,34 @@ export async function deleteSale(req, res) {
       }
     }
 
-    // إرجاع الرصيد الإلكتروني (إذا موجود)
-    if (sale.payment && sale.payment.method === "electronic" && sale.payment.electronicAccount) {
+    // عكس المدفوعات:
+    // لو كان فيه دفع إلكتروني مسجّل (electronicAmount أو payment.method === "electronic")
+    const payment = sale.payment || {};
+    const cashAmount = Number(payment?.cashAmount?.toString?.() || payment?.cashAmount || 0) || 0;
+    const electronicAmount = Number(payment?.electronicAmount?.toString?.() || payment?.electronicAmount || 0) || 0;
+    const electronicAccountId = payment?.electronicAccount || null;
+
+    // لو فيه نقدي — نسجل مصروف بنفس القيمة (عكس الإيداع الذي سجلناه عند الإنشاء)
+    if (cashAmount > 0) {
+      await recordCashMovement({
+        session,
+        branch: sale.branch,
+        type: "expense",
+        amount: Number(cashAmount),
+        reason: `عكس نقدي - حذف فاتورة ${sale.invoiceNo}`,
+        user: req.user._id,
+        referenceType: "sale_deletion",
+        referenceId: sale._id
+      });
+    }
+
+    // لو فيه إلكتروني — نخصم من الحساب الإلكتروني
+    if (electronicAmount > 0 && electronicAccountId) {
       await updateElectronicAccountBalance(
-        sale.payment.electronicAccount, 
-        -Number(sale.roundedTotal?.toString() || sale.total?.toString() || 0), 
-        `حذف-${sale.invoiceNo}`, 
-        req.user._id, 
+        electronicAccountId,
+        -Number(electronicAmount),
+        `حذف-${sale.invoiceNo}`,
+        req.user._id,
         session
       );
     }
@@ -442,19 +448,18 @@ export async function deleteSale(req, res) {
   }
 }
 
-
 export async function getSalesReport(req, res) {
   try {
     const { startDate, endDate, branch, paymentMethod, status } = req.query;
-    
+
     let filter = {};
-    
+
     if (startDate || endDate) {
       filter.createdAt = {};
       if (startDate) filter.createdAt.$gte = new Date(startDate);
       if (endDate) filter.createdAt.$lte = new Date(endDate);
     }
-    
+
     if (branch) filter.branch = branch;
     if (paymentMethod) filter["payment.method"] = paymentMethod;
     if (status) filter.status = status;
@@ -468,11 +473,12 @@ export async function getSalesReport(req, res) {
     const totalSales = sales.length;
     const totalRevenue = sales.reduce((sum, sale) => sum + Number(sale.total?.toString() || 0), 0);
     const roundedRevenue = sales.reduce((sum, sale) => sum + Number(sale.roundedTotal?.toString() || 0), 0);
-    
+
     const paymentStats = {
       cash: { count: 0, amount: 0 },
       electronic: { count: 0, amount: 0 },
-      installment: { count: 0, amount: 0 }
+      installment: { count: 0, amount: 0 },
+      mixed: { count: 0, amount: 0 }
     };
 
     const statusStats = {
@@ -484,14 +490,17 @@ export async function getSalesReport(req, res) {
 
     sales.forEach(sale => {
       // إحصائيات الدفع
-      const paymentMethod = sale.payment?.method || 'cash';
-      const amount = Number(sale.total?.toString() || 0);
-      
-      paymentStats[paymentMethod].count += 1;
-      paymentStats[paymentMethod].amount += amount;
-      
+      const pm = sale.payment?.method || 'cash';
+      const cashAmt = Number(sale.payment?.cashAmount?.toString?.() || sale.payment?.cashAmount || 0) || (pm === 'cash' ? Number(sale.roundedTotal?.toString?.() || 0) : 0);
+      const elecAmt = Number(sale.payment?.electronicAmount?.toString?.() || sale.payment?.electronicAmount || 0) || (pm === 'electronic' ? Number(sale.roundedTotal?.toString?.() || 0) : 0);
+      const amount = cashAmt + elecAmt;
+
+      if (!paymentStats[pm]) paymentStats[pm] = { count: 0, amount: 0 };
+      paymentStats[pm].count += 1;
+      paymentStats[pm].amount += amount;
+
       // إحصائيات الحالة
-      statusStats[sale.status] += 1;
+      statusStats[sale.status] = (statusStats[sale.status] || 0) + 1;
     });
 
     const report = {
@@ -514,12 +523,15 @@ export async function getSalesReport(req, res) {
   }
 }
 
+/**
+ * purchaseScrap - شراء كسر (كما كان)
+ */
 export async function purchaseScrap(req, res) {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
     const { branch, scrapDetails, customer = {}, payment: incomingPayment } = req.body;
-    
+
     if (!scrapDetails || scrapDetails.length === 0) {
       await session.abortTransaction();
       session.endSession();
@@ -613,31 +625,31 @@ export async function purchaseScrap(req, res) {
   }
 }
 
-
-
-// أضف هذه الدالة في sales.controller.js
+/**
+ * getMySales - فواتيري الشخصية (paginated)
+ */
 export async function getMySales(req, res) {
   try {
     const { page = 1, limit = 50, status, startDate, endDate } = req.query;
-    
+
     let filter = { createdBy: req.user._id };
-    
+
     if (status) filter.status = status;
     if (startDate || endDate) {
       filter.createdAt = {};
       if (startDate) filter.createdAt.$gte = new Date(startDate);
       if (endDate) filter.createdAt.$lte = new Date(endDate);
     }
-    
+
     let sales = await Sale.find(filter)
       .populate("createdBy", "name")
       .populate("payment.electronicAccount", "name")
       .sort({ createdAt: -1 })
       .lean()
-      .skip((page-1)*limit)
+      .skip((page - 1) * limit)
       .limit(Number(limit));
 
-    // 🔥 التصحيح النهائي: تحويل البيانات لـ JSON صريح
+    // تحويل البيانات لـ JSON صريح للـ front
     sales = sales.map(sale => ({
       ...sale,
       _id: sale._id?.toString(),
@@ -669,6 +681,10 @@ export async function getMySales(req, res) {
     return error(res, "فشل في جلب الفواتير", 500, err.message);
   }
 }
+
+/**
+ * updateSale - تحديث الحقول المسموح بها
+ */
 export async function updateSale(req, res) {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -726,7 +742,6 @@ export async function updateSale(req, res) {
     await session.abortTransaction();
     session.endSession();
     console.error('Update sale error:', err);
-    // لو الخطأ من فحص Joi أو من mongoose validation، قد يحتوي على تفاصيل
     return error(res, "فشل في تحديث الفاتورة", 500, err.message);
   }
 }

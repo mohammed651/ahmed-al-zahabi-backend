@@ -24,7 +24,6 @@ import {
   updateSaleSchema
 } from "../validators/sale.validator.js";
 
-
 const router = express.Router();
 
 // إنشاء فاتورة بيع عادية
@@ -72,10 +71,11 @@ router.get("/invoice/:invoiceNo",
   permit("admin", "accountant", "storekeeper", "employee"), 
   getSaleByInvoiceNo
 );
+
 // فواتيري الشخصية
 router.get("/my-sales", 
   authMiddleware, 
-  permit("admin", "accountant", "employee"),  // 🔥 غير لـ "accountant" بدل "accountant1", "accountant2"
+  permit("admin", "accountant", "employee"),
   getMySales
 );
 
@@ -94,7 +94,6 @@ router.patch("/:id/status",
   updateSaleStatus
 );
 
-
 // حذف الفاتورة
 router.delete("/:id", 
   authMiddleware, 
@@ -102,7 +101,7 @@ router.delete("/:id",
   deleteSale
 );
 
-// تحديث الفاتورة
+// تحديث الفاتورة (استبدال كامل للفاتورة المرسلة)
 router.put("/:id", 
   authMiddleware, 
   permit("admin", "accountant"), 
