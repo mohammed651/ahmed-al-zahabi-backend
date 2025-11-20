@@ -22,7 +22,7 @@ import returnsRoutes from './api/routes/returns.routes.js';
 import inventoryCountRoutes from './api/routes/inventoryCount.routes.js';
 import advancedReportsRoutes from './api/routes/advancedReports.routes.js';
 import settingsRoutes from './api/routes/settings.routes.js';
-
+import branchRoutes from './api/routes/branch.routes.js';
 const app = express();
 app.use(helmet());
 app.use(express.json({ limit: "5mb" }));
@@ -71,6 +71,7 @@ app.use('/api/returns', returnsRoutes);
 app.use('/api/inventory-count', inventoryCountRoutes);
 app.use('/api/reports', advancedReportsRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/branches', branchRoutes);
 
 app.use(errorHandler);
 

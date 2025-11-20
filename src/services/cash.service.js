@@ -6,19 +6,6 @@ import Branch from "../models/Branch.js";
 /**
  * recordCashMovement()
  * تسجيل أي حركة نقدية وتحديث رصيد الفرع
- *
- * opts = {
- *   session,         // mongoose session (optional)
- *   branch,          // اسم الفرع المتأثر (string) - يستخدم للـ deposit/expense
- *   type,            // "deposit" | "expense" | "transfer"
- *   amount,          // number (موجب)
- *   reason,          // string
- *   user,            // user id
- *   referenceType,   // optional string
- *   referenceId,     // optional ObjectId
- *   fromBranch,      // for transfer
- *   toBranch         // for transfer
- * }
  */
 export async function recordCashMovement(opts = {}) {
   const sessionProvided = Boolean(opts.session);
@@ -50,8 +37,6 @@ export async function recordCashMovement(opts = {}) {
     }
 
     // determine which branch name to store on the movement for traceability
-    // for transfer we'll keep branch field undefined (or could set to fromBranch) —
-    // here we set branch to the 'branch' param if provided, otherwise for transfer use fromBranch.
     const movementBranch = branch || (type === "transfer" ? fromBranch : undefined);
 
     // create movement document
@@ -84,7 +69,6 @@ export async function recordCashMovement(opts = {}) {
       if (!br) throw new Error("branch not found: " + movementBranch);
       const cur = Number(br.cash_balance?.toString?.() || 0);
       const newBalance = cur - numericAmount;
-      // Optional: block if negative (or allow negative if business requires)
       if (newBalance < -0.0001) {
         throw new Error(`Insufficient cash balance in ${movementBranch} (current: ${cur}, withdraw: ${numericAmount})`);
       }
@@ -129,59 +113,306 @@ export async function recordCashMovement(opts = {}) {
 
 /**
  * reverseCashMovement()
- * عكس أي حركة عند الحاجة (مثلاً عند حذف فاتورة)
+ * عكس حركة محسنة مع تسجيل معلومات إضافية ومنع العكس المزدوج
  */
-export async function reverseCashMovement(movementId, opts = {}) {
+export async function reverseCashMovement(movementId, { user, reason = "عكس الحركة" }) {
   const session = await mongoose.startSession();
   session.startTransaction();
+
   try {
-    const mv = await CashMovement.findById(movementId).session(session);
-    if (!mv) throw new Error("Movement not found");
+    // البحث عن الحركة الأصلية
+    const originalMovement = await CashMovement.findById(movementId).session(session);
+    if (!originalMovement) {
+      throw new Error("الحركة غير موجودة");
+    }
 
-    const amount = Number(mv.amount?.toString() || 0);
-    if (!isFinite(amount) || amount <= 0) throw new Error("Invalid movement amount to reverse");
+    // التحقق إذا كانت الحركة معكوسة مسبقاً
+    if (originalMovement.reversed) {
+      throw new Error("الحركة معكوسة مسبقاً");
+    }
 
-    if (mv.type === "deposit") {
+    const amount = Number(originalMovement.amount?.toString() || 0);
+    if (!isFinite(amount) || amount <= 0) {
+      throw new Error("مبلغ الحركة غير صالح للعكس");
+    }
+
+    // إنشاء حركة معاكسة بناءً على نوع الحركة الأصلية
+    if (originalMovement.type === "deposit") {
       // reverse deposit -> expense on same branch
       await recordCashMovement({
         session,
-        branch: mv.branch,
+        branch: originalMovement.branch,
         type: "expense",
         amount,
-        reason: `عكس حركة ${mv._id}`,
-        user: opts.user
+        reason: reason || `عكس حركة ${originalMovement._id}`,
+        user: user
       });
-    } else if (mv.type === "expense") {
+    } else if (originalMovement.type === "expense") {
       // reverse expense -> deposit on same branch
       await recordCashMovement({
         session,
-        branch: mv.branch,
+        branch: originalMovement.branch,
         type: "deposit",
         amount,
-        reason: `عكس حركة ${mv._id}`,
-        user: opts.user
+        reason: reason || `عكس حركة ${originalMovement._id}`,
+        user: user
       });
-    } else if (mv.type === "transfer") {
+    } else if (originalMovement.type === "transfer") {
       // reverse transfer: transfer from toBranch back to fromBranch
-      if (!mv.fromBranch || !mv.toBranch) throw new Error("original transfer branches missing");
+      if (!originalMovement.fromBranch || !originalMovement.toBranch) {
+        throw new Error("بيانات الفروع الأصلية للتحويل غير مكتملة");
+      }
       await recordCashMovement({
         session,
-        fromBranch: mv.toBranch,
-        toBranch: mv.fromBranch,
+        fromBranch: originalMovement.toBranch,
+        toBranch: originalMovement.fromBranch,
         type: "transfer",
         amount,
-        reason: `عكس تحويل ${mv._id}`,
-        user: opts.user
+        reason: reason || `عكس تحويل ${originalMovement._id}`,
+        user: user
       });
     }
 
+    // تحديث الحركة الأصلية لتسجيل معلومات العكس
+    originalMovement.reversed = true;
+    originalMovement.reversedAt = new Date();
+    originalMovement.reversedBy = user;
+    await originalMovement.save({ session });
+
     await session.commitTransaction();
-    session.endSession();
-    return { ok: true };
-  } catch (err) {
+    
+    return {
+      originalMovement,
+      message: "تم عكس الحركة بنجاح"
+    };
+
+  } catch (error) {
     await session.abortTransaction();
+    throw error;
+  } finally {
     session.endSession();
-    throw err;
+  }
+}
+
+/**
+ * updateCashMovement()
+ * تعديل حركة نقدية موجودة
+ */
+export async function updateCashMovement(movementId, updateData, { user, reason }) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // البحث عن الحركة الأصلية
+    const originalMovement = await CashMovement.findById(movementId).session(session);
+    if (!originalMovement) {
+      throw new Error("الحركة غير موجودة");
+    }
+
+    // التحقق إذا كانت الحركة معكوسة
+    if (originalMovement.reversed) {
+      throw new Error("لا يمكن تعديل حركة معكوسة");
+    }
+
+    // حفظ نسخة من البيانات الأصلية قبل التعديل
+    const originalAmount = Number(originalMovement.amount?.toString() || 0);
+    const originalType = originalMovement.type;
+    const originalBranch = originalMovement.branch;
+    const originalFromBranch = originalMovement.fromBranch;
+    const originalToBranch = originalMovement.toBranch;
+
+    // الحقول المسموح بتعديلها
+    const allowedUpdates = ['amount', 'reason', 'type', 'branch', 'fromBranch', 'toBranch'];
+    const updates = {};
+
+    allowedUpdates.forEach(field => {
+      if (updateData[field] !== undefined) {
+        updates[field] = updateData[field];
+      }
+    });
+
+    // إذا لم يكن هناك تغييرات
+    if (Object.keys(updates).length === 0) {
+      throw new Error("لا توجد تغييرات لتطبيقها");
+    }
+
+    // التحقق من صحة البيانات المحدثة
+    if (updates.amount !== undefined) {
+      const newAmount = Number(updates.amount);
+      if (!isFinite(newAmount) || newAmount <= 0) {
+        throw new Error("المبلغ يجب أن يكون رقم موجب");
+      }
+      updates.amount = mongoose.Types.Decimal128.fromString(String(newAmount));
+    }
+
+    // تطبيق التحديثات
+    Object.assign(originalMovement, updates);
+    originalMovement.updatedBy = user;
+    originalMovement.updateReason = reason;
+    
+    await originalMovement.save({ session });
+
+    // تحديث أرصدة الفروع بناءً على التغييرات
+    await updateBranchBalancesOnEdit(
+      originalMovement, 
+      { 
+        amount: originalAmount, 
+        type: originalType, 
+        branch: originalBranch, 
+        fromBranch: originalFromBranch, 
+        toBranch: originalToBranch 
+      },
+      session
+    );
+
+    await session.commitTransaction();
+    
+    return {
+      updatedMovement: originalMovement,
+      message: "تم تعديل الحركة بنجاح"
+    };
+
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
+}
+
+/**
+ * updateBranchBalancesOnEdit()
+ * تحديث أرصدة الفروع عند تعديل حركة
+ */
+async function updateBranchBalancesOnEdit(updatedMovement, originalData, session) {
+  const newAmount = Number(updatedMovement.amount?.toString() || 0);
+  const newType = updatedMovement.type;
+  const newBranch = updatedMovement.branch;
+  const newFromBranch = updatedMovement.fromBranch;
+  const newToBranch = updatedMovement.toBranch;
+
+  const originalAmount = originalData.amount;
+  const originalType = originalData.type;
+  const originalBranch = originalData.branch;
+  const originalFromBranch = originalData.fromBranch;
+  const originalToBranch = originalData.toBranch;
+
+  // التراجع عن التأثير الأصلي
+  await reverseOriginalEffect(originalData, session);
+
+  // تطبيق التأثير الجديد
+  await applyNewEffect({
+    type: newType,
+    amount: newAmount,
+    branch: newBranch,
+    fromBranch: newFromBranch,
+    toBranch: newToBranch
+  }, session);
+}
+
+/**
+ * reverseOriginalEffect()
+ * التراجع عن تأثير الحركة الأصلية
+ */
+async function reverseOriginalEffect(originalData, session) {
+  const { type, amount, branch, fromBranch, toBranch } = originalData;
+
+  if (type === 'deposit') {
+    // التراجع عن إيداع: خصم من الرصيد
+    if (branch) {
+      const br = await Branch.findOne({ code: branch }).session(session);
+      if (br) {
+        const currentBalance = Number(br.cash_balance?.toString() || 0);
+        br.cash_balance = mongoose.Types.Decimal128.fromString(String(currentBalance - amount));
+        await br.save({ session });
+      }
+    }
+  } else if (type === 'expense') {
+    // التراجع عن مصروف: إضافة للرصيد
+    if (branch) {
+      const br = await Branch.findOne({ code: branch }).session(session);
+      if (br) {
+        const currentBalance = Number(br.cash_balance?.toString() || 0);
+        br.cash_balance = mongoose.Types.Decimal128.fromString(String(currentBalance + amount));
+        await br.save({ session });
+      }
+    }
+  } else if (type === 'transfer') {
+    // التراجع عن تحويل: إرجاع للمصدر وخصم من الهدف
+    if (fromBranch) {
+      const fromBr = await Branch.findOne({ code: fromBranch }).session(session);
+      if (fromBr) {
+        const currentFromBalance = Number(fromBr.cash_balance?.toString() || 0);
+        fromBr.cash_balance = mongoose.Types.Decimal128.fromString(String(currentFromBalance + amount));
+        await fromBr.save({ session });
+      }
+    }
+    if (toBranch) {
+      const toBr = await Branch.findOne({ code: toBranch }).session(session);
+      if (toBr) {
+        const currentToBalance = Number(toBr.cash_balance?.toString() || 0);
+        toBr.cash_balance = mongoose.Types.Decimal128.fromString(String(currentToBalance - amount));
+        await toBr.save({ session });
+      }
+    }
+  }
+}
+
+/**
+ * applyNewEffect()
+ * تطبيق تأثير الحركة الجديدة
+ */
+async function applyNewEffect(newData, session) {
+  const { type, amount, branch, fromBranch, toBranch } = newData;
+
+  if (type === 'deposit') {
+    if (branch) {
+      const br = await Branch.findOne({ code: branch }).session(session);
+      if (br) {
+        const currentBalance = Number(br.cash_balance?.toString() || 0);
+        br.cash_balance = mongoose.Types.Decimal128.fromString(String(currentBalance + amount));
+        await br.save({ session });
+      }
+    }
+  } else if (type === 'expense') {
+    if (branch) {
+      const br = await Branch.findOne({ code: branch }).session(session);
+      if (br) {
+        const currentBalance = Number(br.cash_balance?.toString() || 0);
+        const newBalance = currentBalance - amount;
+        // التحقق من الرصيد الكافي
+        if (newBalance < -0.0001) {
+          throw new Error(`الرصيد غير كافي في الفرع ${branch}`);
+        }
+        br.cash_balance = mongoose.Types.Decimal128.fromString(String(newBalance));
+        await br.save({ session });
+      }
+    }
+  } else if (type === 'transfer') {
+    if (fromBranch && toBranch) {
+      const fromBr = await Branch.findOne({ code: fromBranch }).session(session);
+      const toBr = await Branch.findOne({ code: toBranch }).session(session);
+
+      if (!fromBr || !toBr) {
+        throw new Error("أحد الفروع غير موجود");
+      }
+
+      const currentFromBalance = Number(fromBr.cash_balance?.toString() || 0);
+      const newFromBalance = currentFromBalance - amount;
+      
+      if (newFromBalance < -0.0001) {
+        throw new Error(`الرصيد غير كافي في الفرع ${fromBranch}`);
+      }
+
+      const currentToBalance = Number(toBr.cash_balance?.toString() || 0);
+      const newToBalance = currentToBalance + amount;
+
+      fromBr.cash_balance = mongoose.Types.Decimal128.fromString(String(newFromBalance));
+      toBr.cash_balance = mongoose.Types.Decimal128.fromString(String(newToBalance));
+
+      await fromBr.save({ session });
+      await toBr.save({ session });
+    }
   }
 }
 

@@ -9,7 +9,9 @@ import {
   dailyClosing,
   cashTransfer, 
   reconcile,
-  reverseMovement
+  reverseMovement,
+  updateMovement,
+  getMovement
 } from "../controllers/cash.controller.js";
 
 const router = express.Router();
@@ -23,10 +25,12 @@ router.post("/daily-opening", authMiddleware, permit("admin","accountant"), dail
 router.post("/daily-closing", authMiddleware, permit("admin","accountant"), dailyClosing);
 router.post("/transfer", authMiddleware, permit("admin","accountant","storekeeper"), cashTransfer);
 
-// ADD reconciliation endpoint (admin-only)
+// مصالحة الفروع (admin-only)
 router.post("/reconcile", authMiddleware, permit("admin"), reconcile);
 
-// عكس حركة (admin/accountant)
-router.post("/:id/reverse", authMiddleware, permit("admin","accountant"), reverseMovement);
+// إدارة الحركات المتقدمة
+router.get("/:id", authMiddleware, permit("admin","accountant"), getMovement); // جلب حركة محددة
+router.patch("/:id", authMiddleware, permit("admin","accountant"), updateMovement); // تعديل حركة
+router.post("/:id/reverse", authMiddleware, permit("admin","accountant"), reverseMovement); // عكس حركة
 
 export default router;

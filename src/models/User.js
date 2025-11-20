@@ -19,7 +19,7 @@ const userSchema = new Schema({
 userSchema.pre("save", function(next) {
   try {
     if (this.role !== "admin" && (!this.branch || this.branch === "")) {
-      this.branch = "الدور الأول";
+      this.branch = "floor1";
     }
     next();
   } catch (err) {

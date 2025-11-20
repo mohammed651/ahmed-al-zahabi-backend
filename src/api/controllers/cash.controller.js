@@ -4,7 +4,8 @@ import { success, error } from "../../utils/responses.js";
 import {
   recordCashMovement,
   reconcileAllBranches,
-  reverseCashMovement
+  reverseCashMovement,
+  updateCashMovement
 } from "../../services/cash.service.js";
 import CashMovement from "../../models/CashMovement.js";
 
@@ -99,9 +100,36 @@ export async function listCash(req, res) {
   try {
     const items = await CashMovement.find()
       .populate("user", "name")
+      .populate("reversedBy", "name")
+      .populate("updatedBy", "name")
       .sort({ createdAt: -1 });
 
-    return success(res, items, "حركات النقد");
+    // ✅ تحويل يدوي للبيانات
+    const formattedItems = items.map(item => {
+      const plainItem = item.toObject ? item.toObject() : item;
+      
+      return {
+        ...plainItem,
+        _id: plainItem._id?.toString(),
+        amount: plainItem.amount?.toString(),
+        createdAt: plainItem.createdAt?.toISOString(),
+        updatedAt: plainItem.updatedAt?.toISOString(),
+        user: plainItem.user ? {
+          _id: plainItem.user._id?.toString(),
+          name: plainItem.user.name
+        } : null,
+        reversedBy: plainItem.reversedBy ? {
+          _id: plainItem.reversedBy._id?.toString(),
+          name: plainItem.reversedBy.name
+        } : null,
+        updatedBy: plainItem.updatedBy ? {
+          _id: plainItem.updatedBy._id?.toString(),
+          name: plainItem.updatedBy.name
+        } : null
+      };
+    });
+
+    return success(res, formattedItems, "حركات النقد");
   } catch (err) {
     console.error("listCash error:", err);
     return error(res, "فشل في جلب الحركات", 500, err.message);
@@ -267,12 +295,108 @@ export async function reconcile(req, res) {
 export async function reverseMovement(req, res) {
   try {
     const { id } = req.params;
+    const { reason } = req.body;
+
     if (!id) return error(res, "معرف الحركة مطلوب", 400);
 
-    const result = await reverseCashMovement(id, { user: req.user._id });
-    return success(res, result, "تم عكس الحركة");
+    const result = await reverseCashMovement(id, { 
+      user: req.user._id,
+      reason: reason || "عكس الحركة"
+    });
+
+    return success(res, result, "تم عكس الحركة بنجاح");
   } catch (err) {
     console.error("reverseMovement error:", err);
-    return error(res, "فشل في عكس الحركة", 500, err.message);
+    return error(res, err.message, 400);
+  }
+}
+
+/**
+ * تعديل حركة نقدية
+ */
+export async function updateMovement(req, res) {
+  try {
+    const { id } = req.params;
+    const { amount, reason, type, branch, fromBranch, toBranch, updateReason } = req.body;
+
+    if (!id) {
+      return error(res, "معرف الحركة مطلوب", 400);
+    }
+
+    // تجهيز بيانات التحديث
+    const updateData = {};
+    if (amount !== undefined) updateData.amount = amount;
+    if (reason !== undefined) updateData.reason = reason;
+    if (type !== undefined) updateData.type = type;
+    if (branch !== undefined) updateData.branch = branch;
+    if (fromBranch !== undefined) updateData.fromBranch = fromBranch;
+    if (toBranch !== undefined) updateData.toBranch = toBranch;
+
+    // التحقق من وجود تغييرات
+    if (Object.keys(updateData).length === 0) {
+      return error(res, "لا توجد بيانات للتحديث", 400);
+    }
+
+    const result = await updateCashMovement(id, updateData, {
+      user: req.user._id,
+      reason: updateReason || "تعديل الحركة"
+    });
+
+    return success(res, result, "تم تعديل الحركة بنجاح");
+
+  } catch (err) {
+    console.error("updateMovement error:", err);
+    return error(res, err.message, 400);
+  }
+}
+
+/**
+ * جلب حركة محددة
+ */
+export async function getMovement(req, res) {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return error(res, "معرف الحركة مطلوب", 400);
+    }
+
+    const movement = await CashMovement.findById(id)
+      .populate("user", "name username")
+      .populate("reversedBy", "name username")
+      .populate("updatedBy", "name username");
+
+    if (!movement) {
+      return error(res, "الحركة غير موجودة", 404);
+    }
+
+    // تحويل البيانات
+    const formattedMovement = movement.toObject ? movement.toObject() : movement;
+    const result = {
+      ...formattedMovement,
+      _id: formattedMovement._id?.toString(),
+      amount: formattedMovement.amount?.toString(),
+      createdAt: formattedMovement.createdAt?.toISOString(),
+      updatedAt: formattedMovement.updatedAt?.toISOString(),
+      reversedAt: formattedMovement.reversedAt?.toISOString(),
+      user: formattedMovement.user ? {
+        _id: formattedMovement.user._id?.toString(),
+        name: formattedMovement.user.name
+      } : null,
+      reversedBy: formattedMovement.reversedBy ? {
+        _id: formattedMovement.reversedBy._id?.toString(),
+        name: formattedMovement.reversedBy.name
+      } : null,
+      updatedBy: formattedMovement.updatedBy ? {
+        _id: formattedMovement.updatedBy._id?.toString(),
+        name: formattedMovement.updatedBy.name
+      } : null
+    };
+
+    return success(res, result, "بيانات الحركة");
+
+  } catch (err) {
+    console.error("getMovement error:", err);
+    return error(res, "فشل في جلب بيانات الحركة", 500, err.message);
   }
 }
